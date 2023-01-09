@@ -2,9 +2,10 @@
   (:require [reagent.dom :refer [render]]
             [reagent.core :as r]
             ["plotly.js-dist-min" :as plotly]
+            ["seedrandom" :as seedrandom]
             [simulator.number-input :as ni]
-            [rand-cljc.core :as rng]
             [kixi.stats.core :as stats]))
+
 
 (def initial-model-controls
   {:claim-price 10
@@ -26,7 +27,7 @@
 
 (defn bet-on-claim
   [{:keys [lose-prob ruin-prob win-value lose-value ruin-value]} rng]
-  (let [rnd (* (rng/rand rng) 100)]
+  (let [rnd (* (rng) 100)]
     (cond
       (< rnd ruin-prob) ruin-value
       (< rnd (+ ruin-prob lose-prob)) lose-value
@@ -71,7 +72,7 @@
       :else (str (round n)))))
 
 (defn -simulate [params]
-  (let [rng (rng/rng 1)
+  (let [rng (seedrandom 1)
         n-portfolios (:portfolios params)
         n-bets (:bets params)]
     (mapv ; simulate 100 portfolios

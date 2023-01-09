@@ -1,6 +1,5 @@
 {:source-paths ["src"]
  :dependencies [[reagent "1.1.1" :exclusions [cljsjs/react cljsjs/react-dom]]
-                [rand-cljc "0.1.0"]
                 [kixi/stats "0.5.5"]
                 [hashp "0.2.2"]]
  :builds {:app {:target :browser
