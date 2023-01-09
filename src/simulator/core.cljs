@@ -6,22 +6,23 @@
             [rand-cljc.core :as rng]
             [kixi.stats.core :as stats]))
 
+(def initial-model-controls
+  {:claim-price 10
+
+   :win-value 30
+   :lose-value 3
+   :ruin-value 0
+
+   :win-prob 45
+   :lose-prob 45
+   :ruin-prob 10})
+
 (defonce state
   (r/atom
-    {:claim-price 10
-
-     :win-prob 45
-     :lose-prob 45
-     :ruin-prob 5
-
-     :win-value 30
-     :lose-value 3
-     :ruin-value 0
-
+    (assoc initial-model-controls
      :bet-size 10
-
      :portfolios 100
-     :bets 100}))
+     :bets 100)))
 
 (defn bet-on-claim
   [{:keys [lose-prob ruin-prob win-value lose-value ruin-value]} rng]
@@ -126,7 +127,10 @@
         stats (-stats simulated medians)]
     [:div {:style {:display :flex :flex-wrap :wrap :align-items :center :justify-content :space-around}}
      [plot-simulation simulated medians stats]
-     [:table {:style {:color :gray :font-size "0.75em" :margin-left "-200px" :z-index 10}}
+     [:table {:style {:color :gray
+                      :font-size "0.75em"
+                      :margin-left "-10em"
+                      :z-index 10}}
       [:tbody
       [:tr [:td "Mean"] [:td (:mean stats)]]
       [:tr [:td "Median"] [:td (:median stats)]]
@@ -135,17 +139,21 @@
       [:tr [:td "N(Gained)"] [:td (:n-gained stats)]]
       [:tr [:td "N(Lost)"] [:td (:n-lost stats)]]]]]))
 
-(defn adjust-win-lose [state changed-key]
-  (let [win+lose (+ (:win-prob state) (:lose-prob state))
-        adjust-down (max (- win+lose 100) 0)]
-    (case changed-key
-      :win-prob (update state :lose-prob - adjust-down)
-      :lose-prob (update state :win-prob - adjust-down)
-      state)))
-
-(defn adjust-ruin [state]
-  (let [win+lose (+ (:win-prob state) (:lose-prob state))]
-    (assoc state :ruin-prob (.round js/Math (- 100 win+lose)))))
+(defn adjust-probabilities
+  "Adjust probabilities so that they add up to 100."
+  [{:keys [win-prob lose-prob ruin-prob] :as state} changed-key]
+  (if (and (contains? #{:win-prob :lose-prob :ruin-prob} changed-key))
+    (let [adjust (- 100 (+ win-prob lose-prob ruin-prob))
+          [to-adjust nxt] (case changed-key
+                            :win-prob [:lose-prob :lose-prob]
+                            :lose-prob [:win-prob :ruin-prob]
+                            :ruin-prob [:win-prob :win-prob])]
+      (if-not (zero? adjust)
+        (recur
+          (update state to-adjust (fn [x] (-> x (+ adjust) (max 0) (min 100))))
+          nxt)
+        state))
+    state))
 
 (defn model-parameter [s label k props]
   (let [v (get s k)]
@@ -153,7 +161,12 @@
      (merge
        {:label label
         :value v
-        :swap-value (fn [f] (swap! state #(-> % (update k f) (adjust-win-lose k) adjust-ruin)))
+        :swap-value (fn [f]
+                      (swap! state
+                        (fn [s]
+                          (-> s
+                              (update k f)
+                              (adjust-probabilities k)))))
         :min 0
         :max 100
         :text-width 115
@@ -170,7 +183,11 @@
    [model-parameter s "ruin value" :ruin-value {}]
    [model-parameter s "win probability" :win-prob {}]
    [model-parameter s "lose probability" :lose-prob {}]
-   [model-parameter s "ruin probability" :ruin-prob {:disabled? true :swap-value (constantly nil)}]])
+   [model-parameter s "ruin probability" :ruin-prob {}]
+   [:a {:href "#"
+        :style {:font-size "0.60em" :color :gray :text-decoration :none}
+        :onClick (fn [_] (swap! state merge initial-model-controls))}
+    "Reset"]])
 
 (defn simulation-controls [s]
   [:div

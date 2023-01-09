@@ -27,19 +27,22 @@
                 (remove-event-listener! "mouseup" on-mouse-up)
                 (remove-event-listener! "mousemove" on-mouse-move))
               (on-mouse-move [e]
-                (let [[x0 x1] (reset-vals! drag-state (.-clientX e))
-                      delta (- x1 x0)]
+                (let [x0 @drag-state
+                      x1 (.-clientX e)
+                      delta (- x1 x0)
+                      absdelta (.abs js/Math delta)
+                      abs-value-change (* increment (/ absdelta 2))
+                      value-change (if (pos? delta)
+                                     (.floor js/Math abs-value-change)
+                                     (- (.ceil js/Math abs-value-change)))]
+                  (when-not (zero? value-change)
+                    (reset! drag-state x1))
                   (swap-value
                     (fn [n]
                       (clamp opts
                         (if-not n
                           (or init 0)
-                          (let [absdelta (.abs js/Math delta)
-                                change (* increment (/ absdelta 2))]
-                            (+ n
-                               (if (pos? delta)
-                                 (.floor js/Math change)
-                                 (- (.ceil js/Math change)))))))))))]
+                          (+ n value-change)))))))]
         [:div
          {:style {:display       :flex
                   :border-radius 4
@@ -66,7 +69,7 @@
                        (swap-value
                          (fn [_]
                            (clamp opts
-                             (js/parseFloat (.-value (.-target e)))))))
+                                  (js/parseFloat (.-value (.-target e)))))))
            :style    {:width width
                       :border :none
                       :outline :none

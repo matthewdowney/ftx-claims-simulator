@@ -1,14 +1,14 @@
 {:source-paths ["src"]
-
  :dependencies [[reagent "1.1.1" :exclusions [cljsjs/react cljsjs/react-dom]]
                 [rand-cljc "0.1.0"]
-                [kixi/stats "0.5.5"]]
-
+                [kixi/stats "0.5.5"]
+                [hashp "0.2.2"]]
  :builds {:app {:target :browser
                 :output-dir "public/js"
                 :asset-path "js"
                 :modules {:main {:entries [simulator.core]}}
-                :devtools {:before-load simulator.core/stop
+                :devtools {:preloads [hashp.core]
+                           :before-load simulator.core/stop
                            :after-load simulator.core/start
                            :http-root "public"
                            :http-port 8020}}}}
