@@ -47,7 +47,7 @@
          {:style {:display       :flex
                   :border-radius 4
                   :width         (+ width text-width)
-                  :font-size     "0.75em"
+                  :font-size     "0.85em"
                   :margin-right  5}
           :onMouseOver (fn [e] (reset! hover? true))
           :onMouseOut (fn [e] (reset! hover? false))}

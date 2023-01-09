@@ -47,7 +47,7 @@
   (let [plot-id (str (gensym))]
     (r/create-class
       {:display-name "custom-plot-component"
-       :reagent-render (fn [_] [:div {:id plot-id}])
+       :reagent-render (fn [_] [:div {:id plot-id :class "plotly-plot"}])
        :component-did-mount (fn [this] (.newPlot plotly plot-id (clj->js data)))
        :component-did-update
        (fn [this old-argv]
@@ -95,8 +95,8 @@
     (range (:bets params))))
 
 (defn -stats [simulated medians]
-  (let [stdev (transduce identity stats/standard-deviation medians)
-        final-vals (mapv (comp peek :y) simulated)
+  (let [final-vals (mapv (comp peek :y) simulated)
+        stdev (transduce identity stats/standard-deviation final-vals)
         mean (transduce identity stats/mean final-vals)
         med (peek medians)]
     {:mean mean
@@ -106,6 +106,7 @@
      :n-gained (count (filter #(> % 1) final-vals))
      :n-lost (count (filter #(< % 1) final-vals))}))
 
+(defn clamp [min' x max'] (-> x (min max') (max min')))
 ;; TODO: Compute medians separately (incrementally) for a speed boost?
 (defn plot-simulation [simulated medians {:keys [mean median stdev]}]
   (let [m {:y          medians
@@ -120,25 +121,8 @@
                            " ± " (abbrev stdev 4)
                            (str " (μ = " (abbrev mean 4) ")"))
                :xaxis {:title "Bet #"}
-               :yaxis {:title "Bankroll" :type :log}}}]))
-
-(defn simulation [params]
-  (let [simulated (-simulate params)
-        medians (-medians simulated params)
-        stats (-stats simulated medians)]
-    [:div {:style {:display :flex :flex-wrap :wrap :align-items :center :justify-content :space-around}}
-     [plot-simulation simulated medians stats]
-     [:table {:style {:color :gray
-                      :font-size "0.75em"
-                      :margin-left "-10em"
-                      :z-index 10}}
-      [:tbody
-      [:tr [:td "Mean"] [:td (:mean stats)]]
-      [:tr [:td "Median"] [:td (:median stats)]]
-      [:tr [:td "Stdev"] [:td (:stdev stats)]]
-      [:tr [:td "N"] [:td (:n stats)]]
-      [:tr [:td "N(Gained)"] [:td (:n-gained stats)]]
-      [:tr [:td "N(Lost)"] [:td (:n-lost stats)]]]]]))
+               :yaxis {:title "Bankroll" :type :log}
+               :width (- (clamp 550 (.-innerWidth js/window) 950) 50)}}]))
 
 (defn adjust-probabilities
   "Adjust probabilities so that they add up to 100."
@@ -170,14 +154,14 @@
                               (adjust-probabilities k)))))
         :min 0
         :max 100
-        :text-width 115
+        :text-width 125
         :width 50}
        props)
      v]))
 
 (defn model-controls [s]
-  [:div
-   [:p {:style {:font-size "0.75em"}} "Model controls"]
+  [:div {:style {:line-height 1.1}}
+   [:p {:style {:padding 0 :margin 0 :margin-bottom "0.25em"}} "Model inputs"]
    [model-parameter s "claim price" :claim-price {}]
    [model-parameter s "win value" :win-value {:max 500}]
    [model-parameter s "lose value" :lose-value {}]
@@ -185,14 +169,17 @@
    [model-parameter s "win probability" :win-prob {}]
    [model-parameter s "lose probability" :lose-prob {}]
    [model-parameter s "ruin probability" :ruin-prob {}]
-   [:a {:href "#"
-        :style {:font-size "0.60em" :color :gray :text-decoration :none}
-        :onClick (fn [_] (swap! state merge initial-model-controls))}
+   [:button {:style {:font-size "0.60em"
+                     :color :gray
+                     :background :none
+                     :border :none
+                     :cursor :pointer}
+             :onClick (fn [_] (swap! state merge initial-model-controls))}
     "Reset"]])
 
 (defn simulation-controls [s]
-  [:div
-   [:p {:style {:font-size "0.75em"}} "Simulation controls"]
+  [:div {:style {:line-height 1.1}}
+   [:p {:style {:padding 0 :margin 0 :margin-bottom "0.25em"}} "Simulation controls"]
    [model-parameter s "bet size" :bet-size {}]
    [model-parameter s "portfolios" :portfolios {:min 1 :max 1000}]
    [model-parameter s "bets" :bets {:min 10 :max 1000}]])
@@ -200,17 +187,48 @@
 (defn app []
   (let [{:keys [claim-price win-prob lose-prob ruin-prob win-value lose-value ruin-value portfolios bets bet-size]
          :as s} @state]
-    [:div {:style {:max-width 800}}
-     [:div {:style {:display :flex :flex-wrap :wrap :align-items :baseline :justify-content :space-around}}
-      [model-controls s]
-      [simulation-controls s]]
-     [simulation s]
-     [:p "Simulation of " portfolios " portfolios betting " [:strong bet-size "%"]
-      " of their bankroll on each of " bets " bets."]
-     [:p "Each claim costs "  [:strong claim-price "¢"] " and has a "
-      [:strong win-prob "%"] " chance of resolving to " [:strong win-value "¢, "]
-      "a " [:strong lose-prob "%"] " chance of resolving to " [:strong lose-value "¢, "]
-      "and a " [:strong ruin-prob "%"] " chance of resolving to " [:strong ruin-value "¢."]]]))
+    (let [simulated (-simulate s)
+          medians (-medians simulated s)
+          stats (-stats simulated medians)
+
+          ev (/ (+ (* win-prob win-value)
+                   (* lose-prob lose-value)
+                   (* ruin-prob ruin-value))
+                100.0)]
+      [:div
+       [:div {:style {:display :flex
+                      :flex-wrap :wrap
+                      :align-items :flex-start
+                      :justify-content :center}}
+        [model-controls s]
+        [plot-simulation simulated medians stats]
+        [simulation-controls s]]
+       [:div {:style {:display :flex :align-items :center :justify-content :space-around}}
+        [:div {:style {:display :flex
+                       :align-items :center
+                       :justify-content :space-around
+                       :max-width 800}}
+         [:table {:style {:color :gray
+                          :font-size "0.75em"}}
+          [:tbody
+           [:tr [:td "Mean"] [:td (:mean stats)]]
+           [:tr [:td "Median"] [:td (:median stats)]]
+           [:tr [:td "Stdev"] [:td (:stdev stats)]]
+           [:tr [:td "N"] [:td (:n stats)]]
+           [:tr [:td "N(Gained)"] [:td (:n-gained stats)]]
+           [:tr [:td "N(Lost)"] [:td (:n-lost stats)]]]]
+
+         [:div {:style {:margin-left "1em"}}
+          [:p "Simulation of " portfolios " portfolios betting "
+           [:strong bet-size "%"] " of their bankroll on each of "
+           bets " bets."]
+          [:p "Each claim costs "  [:strong claim-price "¢"] " and has a "
+           [:strong win-prob "%"] " chance of resolving to "
+           [:strong win-value "¢, "]
+           "a " [:strong lose-prob "%"] " chance of resolving to "
+           [:strong lose-value "¢, "]
+           "and a " [:strong ruin-prob "%"] " chance of resolving to "
+           [:strong ruin-value "¢"] ", for an EV of " [:strong ev "¢"]]]]]])))
 
 
 (defn stop []
