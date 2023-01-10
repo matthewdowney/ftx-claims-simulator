@@ -51,13 +51,13 @@
                   :margin-right  5}
           :onMouseOver (fn [e] (reset! hover? true))
           :onMouseOut (fn [e] (reset! hover? false))}
-         [:span {:onMouseDown on-mouse-down
+         [:span {:onMouseDown (when-not disabled? on-mouse-down)
                  :style {:padding 5
                          :padding-top 2
                          :padding-bottom 2
                          :padding-left 2
                          :color :gray
-                         :cursor :ew-resize
+                         :cursor (when-not disabled? :ew-resize)
                          :userSelect :none
                          :width text-width}}
           label]

@@ -21,9 +21,10 @@
 (defonce state
   (r/atom
     (assoc initial-model-controls
-     :bet-size 10
-     :portfolios 100
-     :bets 100)))
+      :bet-size 10
+      :portfolios 100
+      :bets 100
+      :view :portfolios)))
 
 (defn bet-on-claim
   [{:keys [lose-prob ruin-prob win-value lose-value ruin-value]} rng]
@@ -155,9 +156,19 @@
         :min 0
         :max 100
         :text-width 125
-        :width 50}
+        :width 50
+        :disabled? (not= (:view s) :portfolios)}
        props)
      v]))
+
+(defn button [label on-click]
+  [:button {:style {:font-size "0.60em"
+                    :color :gray
+                    :background :none
+                    :border :none
+                    :cursor :pointer}
+            :onClick on-click}
+   label])
 
 (defn model-controls [s]
   [:div {:style {:line-height 1.1}}
@@ -169,67 +180,126 @@
    [model-parameter s "win probability" :win-prob {}]
    [model-parameter s "lose probability" :lose-prob {}]
    [model-parameter s "ruin probability" :ruin-prob {}]
-   [:button {:style {:font-size "0.60em"
-                     :color :gray
-                     :background :none
-                     :border :none
-                     :cursor :pointer}
-             :onClick (fn [_] (swap! state merge initial-model-controls))}
-    "Reset"]])
+   (when (= (:view s) :portfolios)
+     [button "Reset" (fn [_] (swap! state merge initial-model-controls))])])
+
+(defn -optimize-bet-size [bet-size]
+  (if (= bet-size 101)
+    (let [[size ret] (->> (get @state :bet-size->median-return)
+                          (sort-by (comp - second))
+                          first)]
+      (swap! state assoc
+        :bet-size size
+        :optimal-bet-size [size ret]))
+
+    (let [simulated (-simulate (swap! state assoc :bet-size bet-size))
+          end-values (vec (sort (map (comp peek :y) simulated)))
+          med (nth end-values (quot (count end-values) 2))]
+      (swap! state update :bet-size->median-return (fnil conj []) [bet-size med])
+
+      (.setTimeout js/window (fn [] (-optimize-bet-size (inc bet-size)))))))
+
+(defn optimize []
+  (swap! state dissoc :bet-size->median-return :optimal-bet-size)
+  (-optimize-bet-size 0))
 
 (defn simulation-controls [s]
   [:div {:style {:line-height 1.1}}
    [:p {:style {:padding 0 :margin 0 :margin-bottom "0.25em"}} "Simulation controls"]
    [model-parameter s "bet size" :bet-size {}]
    [model-parameter s "portfolios" :portfolios {:min 1 :max 1000}]
-   [model-parameter s "bets" :bets {:min 10 :max 1000}]])
+   [model-parameter s "bets" :bets {:min 10 :max 1000}]
+   (if (= (:view s) :portfolios)
+     [button "Optimize bet size"
+      (fn [_] (swap! state assoc :view :optimize) (optimize))]
+     [button "Back to portfolio view"
+      (fn [_] (swap! state assoc :view :portfolios))])])
+
+(defn optimize-view []
+  (let [{:keys [bet-size->median-return optimal-bet-size] :as s} @state]
+    [:div
+     [:div {:style {:display :flex
+                    :flex-wrap :wrap
+                    :align-items :flex-start
+                    :justify-content :center}}
+      [model-controls s]
+      [plot
+       {:data   (into [{:x (map first bet-size->median-return)
+                        :y (map second bet-size->median-return)
+                        :name "Median return"
+                        :type :scatter}]
+                  (if optimal-bet-size
+                    (let [[size ret] optimal-bet-size]
+                      [{:x [size]
+                        :y [ret]
+                        :mode "markers+text"
+                        :text [(str "Bet " size "% for " (abbrev ret 4) "x return")]
+                        :name "Optimal bet"
+                        :textposition :top
+                        :type :scatter}])
+                    []))
+        :layout {:title (str
+                          (if-not optimal-bet-size
+                            "Computing median"
+                            "Median")
+                          " portfolio return by bet size")
+                 :showlegend false
+                 :xaxis {:title "Bet size %"}
+                 :yaxis {:title "Median portfolio return" #_#_:type :log}
+                 :width (- (clamp 550 (.-innerWidth js/window) 950) 50)}}]
+      [simulation-controls s]]]))
+
+(defn portfolio-view []
+  (let [{:keys [claim-price win-prob lose-prob ruin-prob win-value lose-value ruin-value portfolios view bets bet-size]
+         :as s} @state
+        simulated (-simulate s)
+        medians (-medians simulated s)
+        stats (-stats simulated medians)
+
+        ev (/ (+ (* win-prob win-value)
+                 (* lose-prob lose-value)
+                 (* ruin-prob ruin-value))
+              100.0)]
+    [:div
+     [:div {:style {:display :flex
+                    :flex-wrap :wrap
+                    :align-items :flex-start
+                    :justify-content :center}}
+      [model-controls s]
+      [plot-simulation simulated medians stats]
+      [simulation-controls s]]
+
+     [:div {:style {:display :flex :align-items :center :justify-content :space-around}}
+      [:div {:style {:display :flex
+                     :align-items :center
+                     :justify-content :space-around
+                     :max-width 800}}
+       [:table {:style {:color :gray
+                        :font-size "0.75em"}}
+        [:tbody
+         [:tr [:td "Mean"] [:td (:mean stats)]]
+         [:tr [:td "Median"] [:td (:median stats)]]
+         [:tr [:td "Stdev"] [:td (:stdev stats)]]
+         [:tr [:td "N"] [:td (:n stats)]]
+         [:tr [:td "N(Gained)"] [:td (:n-gained stats)]]
+         [:tr [:td "N(Lost)"] [:td (:n-lost stats)]]]]
+
+       [:div {:style {:margin-left "1em"}}
+        [:p "Simulation of " portfolios " portfolios betting "
+         [:strong bet-size "%"] " of their bankroll on each of "
+         bets " bets."]
+        [:p "Each claim costs "  [:strong claim-price "¢"] " and has a "
+         [:strong win-prob "%"] " chance of resolving to "
+         [:strong win-value "¢, "]
+         "a " [:strong lose-prob "%"] " chance of resolving to "
+         [:strong lose-value "¢, "]
+         "and a " [:strong ruin-prob "%"] " chance of resolving to "
+         [:strong ruin-value "¢"] ", for an EV of " [:strong ev "¢"]"."]]]]]))
 
 (defn app []
-  (let [{:keys [claim-price win-prob lose-prob ruin-prob win-value lose-value ruin-value portfolios bets bet-size]
-         :as s} @state]
-    (let [simulated (-simulate s)
-          medians (-medians simulated s)
-          stats (-stats simulated medians)
-
-          ev (/ (+ (* win-prob win-value)
-                   (* lose-prob lose-value)
-                   (* ruin-prob ruin-value))
-                100.0)]
-      [:div
-       [:div {:style {:display :flex
-                      :flex-wrap :wrap
-                      :align-items :flex-start
-                      :justify-content :center}}
-        [model-controls s]
-        [plot-simulation simulated medians stats]
-        [simulation-controls s]]
-       [:div {:style {:display :flex :align-items :center :justify-content :space-around}}
-        [:div {:style {:display :flex
-                       :align-items :center
-                       :justify-content :space-around
-                       :max-width 800}}
-         [:table {:style {:color :gray
-                          :font-size "0.75em"}}
-          [:tbody
-           [:tr [:td "Mean"] [:td (:mean stats)]]
-           [:tr [:td "Median"] [:td (:median stats)]]
-           [:tr [:td "Stdev"] [:td (:stdev stats)]]
-           [:tr [:td "N"] [:td (:n stats)]]
-           [:tr [:td "N(Gained)"] [:td (:n-gained stats)]]
-           [:tr [:td "N(Lost)"] [:td (:n-lost stats)]]]]
-
-         [:div {:style {:margin-left "1em"}}
-          [:p "Simulation of " portfolios " portfolios betting "
-           [:strong bet-size "%"] " of their bankroll on each of "
-           bets " bets."]
-          [:p "Each claim costs "  [:strong claim-price "¢"] " and has a "
-           [:strong win-prob "%"] " chance of resolving to "
-           [:strong win-value "¢, "]
-           "a " [:strong lose-prob "%"] " chance of resolving to "
-           [:strong lose-value "¢, "]
-           "and a " [:strong ruin-prob "%"] " chance of resolving to "
-           [:strong ruin-value "¢"] ", for an EV of " [:strong ev "¢"]]]]]])))
-
+  (if (= (:view @state) :portfolios)
+    [portfolio-view]
+    [optimize-view]))
 
 (defn stop []
   (js/console.log "Stopping..."))
