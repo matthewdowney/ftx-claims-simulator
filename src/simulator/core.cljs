@@ -187,12 +187,13 @@
 
 (defn -optimize-bet-size [bet-size]
   (if (= bet-size 101)
-    (let [[size ret] (->> (get @state :bet-size->median-return)
-                          (sort-by (comp - second))
-                          first)]
+    (let [rets (sort-by (comp - second) (get @state :bet-size->median-return))
+          [size ret] (first rets)
+          boundary (first (drop-while #(>= (second %) 1) rets))]
       (swap! state assoc
         :bet-size size
-        :optimal-bet-size [size ret]))
+        :optimal-bet-size [size ret]
+        :boundary boundary))
 
     (let [simulated (-simulate (swap! state assoc :bet-size bet-size))
           end-values (vec (sort (map (comp peek :y) simulated)))
@@ -202,7 +203,7 @@
       (.setTimeout js/window (fn [] (-optimize-bet-size (inc bet-size)))))))
 
 (defn optimize []
-  (swap! state dissoc :bet-size->median-return :optimal-bet-size)
+  (swap! state dissoc :bet-size->median-return :optimal-bet-size :boundary)
   (-optimize-bet-size 0))
 
 (defn simulation-controls [s]
@@ -216,7 +217,7 @@
      [button "Back to portfolio view" (fn [_] (swap! state assoc :view :portfolios))])])
 
 (defn optimize-view []
-  (let [{:keys [bet-size->median-return optimal-bet-size] :as s} @state]
+  (let [{:keys [bet-size->median-return optimal-bet-size boundary] :as s} @state]
     [:div
      [:div {:style {:display :flex
                     :flex-wrap :wrap
@@ -229,11 +230,12 @@
                   :name "Median return"
                   :type :scatter}
                  (let [[size ret] (or optimal-bet-size (last bet-size->median-return))]
-                   {:x [size]
-                    :y [ret]
+                   {:x [size (first boundary)]
+                    :y [ret (second boundary)]
                     :mode "markers+text"
-                    :text [(str "Bet " size "% for " (abbrev ret 4) "x return")]
-                    :name "Optimal bet"
+                    :text [(str "Bet " size "% for " (abbrev ret 4) "x return")
+                           (str "Starts losing after " (first boundary) "%")]
+                    :name ""
                     :textposition :top
                     :type :scatter})]
         :layout {:title (str
