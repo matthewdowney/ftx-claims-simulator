@@ -1,10 +1,12 @@
 (ns simulator.core
-  (:require [reagent.dom :refer [render]]
-            [reagent.core :as r]
-            ["plotly.js-dist-min" :as plotly]
-            ["seedrandom" :as seedrandom]
-            [simulator.number-input :as ni]
-            [kixi.stats.core :as stats]))
+  (:require
+    [cljs.reader :as reader]
+    [reagent.dom :refer [render]]
+    [reagent.core :as r]
+    ["plotly.js-dist-min" :as plotly]
+    ["seedrandom" :as seedrandom]
+    [simulator.number-input :as ni]
+    [kixi.stats.core :as stats]))
 
 
 (def initial-model-controls
@@ -210,10 +212,8 @@
    [model-parameter s "portfolios" :portfolios {:min 1 :max 1000}]
    [model-parameter s "bets" :bets {:min 10 :max 1000}]
    (if (= (:view s) :portfolios)
-     [button "Optimize bet size"
-      (fn [_] (swap! state assoc :view :optimize) (optimize))]
-     [button "Back to portfolio view"
-      (fn [_] (swap! state assoc :view :portfolios))])])
+     [button "Optimize bet size" (fn [_] (swap! state assoc :view :optimize) (optimize))]
+     [button "Back to portfolio view" (fn [_] (swap! state assoc :view :portfolios))])])
 
 (defn optimize-view []
   (let [{:keys [bet-size->median-return optimal-bet-size] :as s} @state]
@@ -224,20 +224,18 @@
                     :justify-content :center}}
       [model-controls s]
       [plot
-       {:data   (into [{:x (map first bet-size->median-return)
-                        :y (map second bet-size->median-return)
-                        :name "Median return"
-                        :type :scatter}]
-                  (if optimal-bet-size
-                    (let [[size ret] optimal-bet-size]
-                      [{:x [size]
-                        :y [ret]
-                        :mode "markers+text"
-                        :text [(str "Bet " size "% for " (abbrev ret 4) "x return")]
-                        :name "Optimal bet"
-                        :textposition :top
-                        :type :scatter}])
-                    []))
+       {:data   [{:x (map first bet-size->median-return)
+                  :y (map second bet-size->median-return)
+                  :name "Median return"
+                  :type :scatter}
+                 (let [[size ret] (or optimal-bet-size (last bet-size->median-return))]
+                   {:x [size]
+                    :y [ret]
+                    :mode "markers+text"
+                    :text [(str "Bet " size "% for " (abbrev ret 4) "x return")]
+                    :name "Optimal bet"
+                    :textposition :top
+                    :type :scatter})]
         :layout {:title (str
                           (if-not optimal-bet-size
                             "Computing median"
@@ -297,9 +295,15 @@
          [:strong ruin-value "¢"] ", for an EV of " [:strong ev "¢"]"."]]]]]))
 
 (defn app []
-  (if (= (:view @state) :portfolios)
-    [portfolio-view]
-    [optimize-view]))
+  (js/btoa (pr-str @state))
+  [:div
+   [:div {:class :container}
+    [:a {:href (str "?s=" (js/btoa (pr-str (dissoc @state :bet-size->median-return))) "#app")
+         :style {:float :right :font-size "0.75em" :margin-right "1.5em"}}
+     "Link to this model state"]]
+   (if (= (:view @state) :portfolios)
+     [portfolio-view]
+     [optimize-view])])
 
 (defn stop []
   (js/console.log "Stopping..."))
@@ -310,3 +314,16 @@
 
 (defn ^:export init []
   (start))
+
+;; Parse query params and look for linked state
+(defonce qps
+  (let [qps (.-search (.-location js/window))
+        qps (into {}
+              (for [[_ k v] (re-seq #"([^&=?]+)=([^&]+)" qps)]
+                [(keyword k) v]))]
+    (when-let [saved-state (:s qps)]
+      (try
+        (let [s (swap! state merge (reader/read-string (js/atob saved-state)))]
+          (when (= (:view s) :optimize)
+            (optimize)))
+        (catch js/Error _)))))
