@@ -10,14 +10,14 @@
 
 
 (def initial-model-controls
-  {:claim-price 10
+  {:claim-price 15
 
-   :win-value 30
-   :lose-value 3
+   :win-value 45
+   :lose-value 10
    :ruin-value 0
 
-   :win-prob 45
-   :lose-prob 45
+   :win-prob 40
+   :lose-prob 50
    :ruin-prob 10})
 
 (defonce state
@@ -242,7 +242,7 @@
                           (if-not optimal-bet-size
                             "Computing median"
                             "Median")
-                          " portfolio return by bet size")
+                          " portfolio return by bet size, over " (:bets s) " bets")
                  :showlegend false
                  :xaxis {:title "Bet size %"}
                  :yaxis {:title "Median portfolio return" #_#_:type :log}
