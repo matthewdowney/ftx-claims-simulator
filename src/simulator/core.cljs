@@ -185,26 +185,39 @@
    (when (= (:view s) :portfolios)
      [button "Reset" (fn [_] (swap! state merge initial-model-controls))])])
 
-(defn -optimize-bet-size [bet-size]
+(defn -optimize-bet-size [bet-size {:keys [p0 p5]}]
   (if (= bet-size 101)
     (let [rets (sort-by (comp - second) (get @state :bet-size->median-return))
           [size ret] (first rets)
-          boundary (first (drop-while #(>= (second %) 1) rets))]
+          [lsize lret] (first (drop-while #(>= (second %) 1) rets))]
       (swap! state assoc
         :bet-size size
         :optimal-bet-size [size ret]
-        :boundary boundary))
+        :annotations [p0
+                      [size ret (str "f* = " size "%") #_(str "Bet " size "% for " (abbrev ret 4) "x return")]
+                      p5
+                      [lsize lret #_"Losing" (str "Median loses after " lsize "%")]]))
 
     (let [simulated (-simulate (swap! state assoc :bet-size bet-size))
           end-values (vec (sort (map (comp peek :y) simulated)))
-          med (nth end-values (quot (count end-values) 2))]
+          med (nth end-values (quot (count end-values) 2))
+          losing-% (/ (count (filter #(< % 1) end-values)) (count end-values))
+          p0 (if (zero? losing-%)
+               [bet-size med #_"p0" (str "None lose before " bet-size "%")]
+               p0)
+          p5 (if (and (not p5) (>= losing-% 0.05))
+               [bet-size med #_"p5" (str "> 5% lose after " bet-size "%")]
+               p5)]
       (swap! state update :bet-size->median-return (fnil conj []) [bet-size med])
 
-      (.setTimeout js/window (fn [] (-optimize-bet-size (inc bet-size)))))))
+      (.setTimeout
+        js/window
+        (fn []
+          (-optimize-bet-size (inc bet-size) {:p0 p0 :p5 p5}))))))
 
 (defn optimize []
-  (swap! state dissoc :bet-size->median-return :optimal-bet-size :boundary)
-  (-optimize-bet-size 0))
+  (swap! state dissoc :bet-size->median-return :optimal-bet-size :annotations)
+  (-optimize-bet-size 0 {}))
 
 (defn simulation-controls [s]
   [:div {:style {:line-height 1.1}}
@@ -217,7 +230,7 @@
      [button "Back to portfolio view" (fn [_] (swap! state assoc :view :portfolios))])])
 
 (defn optimize-view []
-  (let [{:keys [bet-size->median-return optimal-bet-size boundary] :as s} @state]
+  (let [{:keys [bet-size->median-return optimal-bet-size annotations] :as s} @state]
     [:div
      [:div {:style {:display :flex
                     :flex-wrap :wrap
@@ -228,25 +241,32 @@
        {:data   [{:x (map first bet-size->median-return)
                   :y (map second bet-size->median-return)
                   :name "Median return"
-                  :type :scatter}
-                 (let [[size ret] (or optimal-bet-size (last bet-size->median-return))]
-                   {:x [size (first boundary)]
-                    :y [ret (second boundary)]
-                    :mode "markers+text"
-                    :text [(str "Bet " size "% for " (abbrev ret 4) "x return")
-                           (str "Starts losing after " (first boundary) "%")]
-                    :name ""
-                    :textposition :top
-                    :type :scatter})]
+                  :type :scatter}]
         :layout {:title (str
                           (if-not optimal-bet-size
                             "Computing median"
                             "Median")
-                          " portfolio return by bet size, over " (:bets s) " bets")
+                          " return by bet size, " (:portfolios s) " simulated portfolios x " (:bets s) " bets")
                  :showlegend false
                  :xaxis {:title "Bet size %"}
                  :yaxis {:title "Median portfolio return" #_#_:type :log}
-                 :width (- (clamp 550 (.-innerWidth js/window) 950) 50)}}]
+                 :width (- (clamp 550 (.-innerWidth js/window) 950) 50)
+                 :annotations (into []
+                                (comp
+                                  (map-indexed vector)
+                                  (map
+                                    (fn [[idx [size ret text]]]
+                                      {:x size
+                                        :y ret
+                                        :xref :x
+                                        :yref :y
+                                        :text text
+                                        :showarrow true
+                                        :arrowhead 6
+                                        :ax 0
+                                        :ay ((if (even? idx) - +)
+                                             (nth [20 20 35 35] (mod idx 4)))})))
+                                (sort-by first annotations))}}]
       [simulation-controls s]]]))
 
 (defn portfolio-view []
